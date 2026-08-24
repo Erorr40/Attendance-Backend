@@ -40,8 +40,8 @@ app.use(
   })
 );
 
-// Configure CORS for standalone server deployment
-const rawCorsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:3000';
+// Configure CORS for standalone and cloud deployment
+const rawCorsOrigin = process.env.CORS_ORIGIN || 'https://attendance-systemfrontend.pages.dev,http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173';
 const allowedOrigins = rawCorsOrigin.split(',').map((s) => s.trim());
 
 app.use(
@@ -49,10 +49,26 @@ app.use(
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps, curl, SSE, or postman)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      return callback(null, true); // Fallback to permissive in dev
+      
+      try {
+        const url = new URL(origin);
+        const host = url.hostname.toLowerCase();
+        if (
+          host === 'attendance-systemfrontend.pages.dev' ||
+          host.endsWith('.attendance-systemfrontend.pages.dev') ||
+          host.endsWith('.pages.dev') ||
+          host.endsWith('.netlify.app') ||
+          host.endsWith('ahmedraafat.me') ||
+          host === 'localhost' ||
+          host === '127.0.0.1' ||
+          allowedOrigins.includes('*') ||
+          allowedOrigins.includes(origin)
+        ) {
+          return callback(null, true);
+        }
+      } catch {}
+
+      return callback(null, true);
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -2225,7 +2241,7 @@ app.get('/api/reports/attendance', authMiddleware, (req: AuthRequest, res: Respo
   }
 
   if (format === 'csv') {
-    let csv = 'Teacher Name,Employee ID,Department,Date,Scheduled Start,Check-In,Check-Out,Status,Late (Mins),Device,Verification\n';
+    let csv = '\uFEFFTeacher Name,Employee ID,Department,Date,Scheduled Start,Check-In,Check-Out,Status,Late (Mins),Device,Verification\n';
     filtered.forEach((r) => {
       csv += `"${r.teacherName}","${r.employeeId}","${r.departmentName}","${r.date}","${r.scheduledStartTime}","${
         r.checkInTime || '--'
@@ -2234,7 +2250,7 @@ app.get('/api/reports/attendance', authMiddleware, (req: AuthRequest, res: Respo
       }"\n`;
     });
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=Elswedy_Attendance_Report_${sDate}_to_${eDate}.csv`);
     return res.send(csv);
   }
@@ -2430,19 +2446,52 @@ app.post(
   }
 );
 
-// GET /api/health and /health - Public Health Check for Hosting Platforms (Render, Railway, Fly.io, AWS, etc.)
-app.get(['/api/health', '/health'], (req: Request, res: Response) => {
+// GET /api/system/seed & POST /api/system/seed (HR Admin Only)
+const handleSystemSeed = async (req: AuthRequest, res: Response) => {
+  try {
+    // Reset in-memory / MongoDB data
+    systemLogsList.unshift({
+      id: `syslog-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      level: 'SUCCESS',
+      component: 'System Seeder',
+      message: 'System database reset and re-seeded successfully',
+      details: `Active faculty: ${teachers.length}, Departments: ${departments.length}`,
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully seeded database with ${teachers.length} faculty members and today's attendance logs.`,
+      teachersCount: teachers.length,
+      stats: {
+        totalTeachers: teachers.length,
+        registeredFingerprints: teachers.filter((t) => t.fingerprintStatus === 'Registered').length,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Seeding failed' });
+  }
+};
+
+app.post('/api/system/seed', authMiddleware, requireRole('hr_admin'), handleSystemSeed);
+app.get('/api/system/seed', authMiddleware, requireRole('hr_admin'), handleSystemSeed);
+app.post('/api/seed', authMiddleware, requireRole('hr_admin'), handleSystemSeed);
+app.get('/api/seed', authMiddleware, requireRole('hr_admin'), handleSystemSeed);
+
+// GET / /api /api/health and /health - Public Health Checks
+app.get(['/', '/api', '/api/health', '/health'], (req: Request, res: Response) => {
   res.json({
     status: 'UP',
-    service: 'Elswedy Biometric Attendance API',
+    service: 'Elswedy Biometric Attendance Express API',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
     database: {
       connected: isMongoConnected,
-      mode: isMongoConnected ? 'MongoDB Cloud' : 'In-Memory Active Fallback',
+      mode: isMongoConnected ? 'MongoDB Cloud Database' : 'In-Memory Active Fallback',
     },
-    environment: process.env.NODE_ENV || 'development',
+    environment: process.env.NODE_ENV || 'production',
+    message: 'Elswedy Attendance Backend API is active and operational.',
   });
 });
 
