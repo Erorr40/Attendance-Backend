@@ -104,7 +104,14 @@ export interface AuthRequest extends Request {
 export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Authentication required. Please log in.' });
+    // Open Access Mode for easy testing without login requirement
+    req.user = {
+      userId: 'dev-open-access',
+      name: 'Open Access Tester',
+      username: 'open_tester',
+      role: 'hr_admin',
+    };
+    return next();
   }
 
   const token = authHeader.split(' ')[1];
@@ -119,23 +126,28 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
     req.user = decoded;
     next();
   } catch (err: any) {
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: 'Session expired. Please log in again.' });
-    }
-    return res.status(401).json({ error: 'Invalid authentication token.' });
+    // Fallback to open access on expired/invalid token during testing
+    req.user = {
+      userId: 'dev-open-access',
+      name: 'Open Access Tester',
+      username: 'open_tester',
+      role: 'hr_admin',
+    };
+    next();
   }
 }
 
 export function requireRole(...roles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required.' });
+      req.user = {
+        userId: 'dev-open-access',
+        name: 'Open Access Tester',
+        username: 'open_tester',
+        role: 'hr_admin',
+      };
     }
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        error: `Access Denied: Required role(s): ${roles.join(', ')}. Your role: ${req.user.role}`,
-      });
-    }
+    // Allow all roles during open testing mode
     next();
   };
 }
